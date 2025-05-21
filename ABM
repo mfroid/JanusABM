@@ -1,0 +1,1828 @@
+package JanusABM;
+import HAL.GridsAndAgents.AgentGrid2D;
+import HAL.GridsAndAgents.AgentSQ2Dunstackable;
+import HAL.GridsAndAgents.PDEGrid2D;
+import HAL.Gui.GifMaker;
+import HAL.Gui.GridWindow;
+import HAL.Gui.UIGrid;
+import HAL.Rand;
+import HAL.Tools.FileIO;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.File;
+import static JanusABM.Grid_ON_LATTICE.*;
+import static HAL.Util.*;
+import java.util.*;
+import java.util.List;
+import java.text.SimpleDateFormat;
+import java.io.BufferedWriter;
+//////////////
+//GRID CLASS//
+//////////////
+public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
+    public final static int BLAST = 1; // blast cells
+    public final static int STEM = 2; // stem cells
+    public final static int EC_SIN = 3; // ec cells
+    public final static int EC_ART = 4; // ec cells
+    public final static int Initial_Blast = 9000; // initial blast population
+    public final static int Initial_Stem = 500; // initial stem population
+    final static double PROLIFERATION_PROB = .70;
+    final static double DEATH_PROB = 0.15;
+    final static double STEM_PROLIFERATION_PROB = 0.50;
+    final static double STEM_DEATH_PROB = 0.015;
+    public double MIR_Uptake = -0.27;
+    public double MIR_Diff_Rate = 0.2;
+    public double MIR_Decay = -.01;
+    public double TNFA_Uptake = -.30;
+    public double TNFA_Diff_Rate = 0.1; //0.15
+    public double TNFA_Decay = -.01;
+    public static double TREATMENT_START = 40;
+    public double TREATMENT_Production = 1.0;
+    public double TREATMENT_Uptake = 1;
+    public double TREATMENT_Diff_Rate = 2.5; //2.33 x 10^-12 m^2/s, 2.5 worked
+    public double anti_MIR_Diff_Rate = 0.133; //
+    public double TREATMENT_Death = 1.0;
+    public double TREATMENT_Decay = -0.01;
+    public double anti_MIR_Uptake = 1;
+
+    //public static double anti_MIR_PRETREAT = 4;
+    //public static double TREATMENT_Duration = TREATMENT_START+ 30; // for 30 days TKI
+
+    //public static double TREATMENT_Duration = TREATMENT_START+ 30-anti_MIR_PRETREAT; // for dose control
+
+    //public double anti_MIR_END = TREATMENT_START + 30; //change the miRisten end point
+
+    //public double anti_MIR_END = TREATMENT_START + 30; //change the miRisten end point
+
+    // 9/11/23
+    // added anti_MIR_END and anti_MIR_POST_END
+    // need to test if the code still runs when the proper end point is selected for pre and post anti_MIR
+    // the code below was updated so that pre and post anti_MIR ends at anti_MIR_END and anti_MIR_POST_END
+    // ask David if I should do something about MIR having no half-life, but half-life of TKI being ~7 days
+
+    // 9/12/23
+    // remember to remove the subtraction of miristen pretreatment from tki treatment duration
+    // possibly modify code for a switch between the two lines rather than commenting out
+
+    //9/13/23
+    // need to add a case for when pre or post treatment with miristen is 1 day
+    // otherwise there is no pretreatment
+
+    // 10/3/23
+    // cytarabine molecular weight 243.22
+
+    // 9/10/24
+    // recollecting all data
+    // starting with only TKI on the base grid
+    // miristen pretreatment 14 days
+    // miristen concurrent
+    // miristen pretreatment 7 days
+    // miristen pretreatment 2 days
+    // miristen pretreatment 1 day
+    // 30 days total treatment with miristen for 1, 2, 7, 14 days
+    // different vascular architectures with tki
+    // 10/18/24 try 4 days pretreatment with 26 days TKI for all vascular architectures
+
+    //public static double anti_MIR_POST_TREAT = 0;
+    //public double anti_MIR_POST_END = TREATMENT_Duration+anti_MIR_POST_TREAT;
+
+    public final static double STEPS = 15;
+    public final static int ITERATIONS = 1;
+    public static boolean HEADLESS = false;
+    public static boolean LOCAL = true;
+    public PDEGrid2D MIR;
+    public PDEGrid2D TNFA;
+    public PDEGrid2D TREATMENT;
+    public PDEGrid2D anti_MIR;
+
+    FileIO output;
+    SimpleDateFormat timeForRand = new SimpleDateFormat("HHmm"); // Use HH for 24-hour format
+    String timeString = timeForRand.format(new Date()); // Get the current time as a formatted string
+    int resultForRand = Integer.parseInt(timeString); // Parse the formatted string to an integer
+   //Rand rn = new Rand(resultForRand); // Set the seed for Rand
+    Rand rn = new Rand(); // Set the seed for Rand
+
+    ////////////////////
+    //GRID CONSTRUCTOR//
+    ////////////////////
+
+    public Grid_ON_LATTICE(int xDim, int yDim, double VASC_GRID, boolean BASE_GRID, String outFileName) {
+        super(xDim, yDim, JanusABM.Agents_ON_LATTICE.class, true, true);
+        MIR = new PDEGrid2D(xDim, yDim, wrapX = true, wrapY = true);
+        TNFA = new PDEGrid2D(xDim, yDim, wrapX = true, wrapY = true);
+        TREATMENT = new PDEGrid2D(xDim, yDim, true, true);
+        anti_MIR = new PDEGrid2D(xDim, yDim, wrapX = true, wrapY = true);
+        output = new FileIO(outFileName, "w");
+        output.Write("Time,BLAST,STEM,SIN,ART,MIR,TNFA,anti-MIR,TREATMENT" + "\n");
+        //Initially place cells; random distribution
+        int xinit, yinit;
+        if (VASC_GRID == 1 & BASE_GRID == false) {
+
+        } else if (VASC_GRID == 2 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 15;
+            int InitEC_ART = 15;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (40);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (40);
+                    yinit = (15 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN + 15; k++) {
+                do {
+                    xinit = (40 + k);
+                    yinit = (30 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART + 15; k++) {
+                do {
+                    xinit = (40 + 30 + k);
+                    yinit = (60 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+
+        } else if (VASC_GRID == 3 & BASE_GRID == false) {
+
+        } else if (VASC_GRID == 4 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 15;
+            int InitEC_ART = 15;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (0 + k);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (15 + k);
+                    yinit = (15 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 5 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 25;
+            int InitEC_ART = 25;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (99);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (99);
+                    yinit = (25 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+            for (int k = 0; k < 15; k++) {
+                do {
+                    xinit = (99 - k);
+                    yinit = (50 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 25; k++) {
+                do {
+                    xinit = (99 - 15);
+                    yinit = (65 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 6 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 50;
+            int InitEC_ART = 50;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (40);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (40);
+                    yinit = (50 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 7 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 10;
+            int InitEC_ART = 10;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (99 - k);
+                    yinit = (99 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (99 - 10 - k);
+                    yinit = (99 - 10 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (79);
+                    yinit = (79 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (79);
+                    yinit = (39 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 8 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 5;
+            int InitEC_ART = 5;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (0 + k);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (5 + k);
+                    yinit = (5 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (10 + k);
+                    yinit = (10);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (50 + k);
+                    yinit = (10);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (11 + k);
+                    yinit = (11 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (51 + k);
+                    yinit = (51 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 9 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 50;
+            int InitEC_ART = 50;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (99);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (99);
+                    yinit = (50 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 10 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 15;
+            int InitEC_ART = 15;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (10 + k);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (25 + k);
+                    yinit = (15 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 35; k++) {
+                do {
+                    xinit = (40);
+                    yinit = (30 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 35; k++) {
+                do {
+                    xinit = (40);
+                    yinit = (65 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 11 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 50;
+            int InitEC_ART = 50;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (0 + k);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (50 + k);
+                    yinit = (50 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 10; k++) {
+                do {
+                    xinit = (79);
+                    yinit = (99 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 10; k++) {
+                do {
+                    xinit = (79);
+                    yinit = (89 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 12 & BASE_GRID == false) {
+
+        } else if (VASC_GRID == 13 & BASE_GRID == false) {
+
+        } else if (VASC_GRID == 14 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 10;
+            int InitEC_ART = 10;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (10);
+                    yinit = (99 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (10);
+                    yinit = (89 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+            for (int k = 0; k < 5; k++) {
+                do {
+                    xinit = (10 - k);
+                    yinit = (79 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 6; k++) {
+                do {
+                    xinit = (5 - k);
+                    yinit = (74 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 15 & BASE_GRID == false) {
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 10;
+            int InitEC_ART = 10;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (0);
+                    yinit = (99 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (0);
+                    yinit = (89 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (0 + k);
+                    yinit = (79 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 40; k++) {
+                do {
+                    xinit = (40 + k);
+                    yinit = (39 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 20; k++) {
+                do {
+                    xinit = (60 + k);
+                    yinit = (20 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 20; k++) {
+                do {
+                    xinit = (80 + k);
+                    yinit = (40 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+
+        } else if (VASC_GRID == 16 & BASE_GRID == false) {
+
+        } else if (BASE_GRID == true) {
+
+
+            // Here we are initializing the number of ec cells
+            int InitEC_SIN = 10;
+            int InitEC_ART = 10;
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (0 + k + 9);
+                    yinit = (0 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (10 + k + 9);
+                    yinit = (10 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (20 + 9);
+                    yinit = (21 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (20 + 9);
+                    yinit = (31 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (20 - k + 9);
+                    yinit = (41 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (10 - k + 9);
+                    yinit = (51 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (9);
+                    yinit = (61 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (9);
+                    yinit = (71 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (21 + k + 9);
+                    yinit = (41 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (31 + k + 9);
+                    yinit = (51 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (40 + 9);
+                    yinit = (61 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (40 + 9);
+                    yinit = (71 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (41 + k + 9);
+                    yinit = (73 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (51 + k + 9);
+                    yinit = (83 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (20 + k + 9);
+                    yinit = (20 - k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (30 + k + 9);
+                    yinit = (12 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_SIN; k++) {
+                do {
+                    xinit = (40 + k + 9);
+                    yinit = (22 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < InitEC_ART; k++) {
+                do {
+                    xinit = (50 + k + 9);
+                    yinit = (32);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 10; k++) {
+                do {
+                    xinit = (59 + k + 9);
+                    yinit = (33 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_SIN;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+            for (int k = 0; k < 10; k++) {
+                do {
+                    xinit = (69 + k + 9);
+                    yinit = (43 + k);
+                }
+                while (PopAt(xinit, yinit) > 0);
+                // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+                JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+                c.type = EC_ART;
+                c.parent = xinit * xDim + yinit;
+                c.SetCellColor();
+            }
+        }
+        int InitBlasts = Initial_Blast;
+        for (int k = 0; k < InitBlasts; k++) {
+            do {
+                xinit = rn.Int(xDim);
+                yinit = rn.Int(yDim);
+            }
+            while (PopAt(xinit, yinit) > 0);
+            // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+            JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+            c.type = BLAST;
+            c.parent = xinit * yDim + yinit;
+            c.SetCellColor();
+        }
+        int InitStem = Initial_Stem;
+        for (int k = 0; k < InitStem; k++) {
+            do {
+                xinit = rn.Int(xDim);
+                yinit = rn.Int(yDim);
+            }
+            while (PopAt(xinit, yinit) > 0);
+            // Once xinit and yinit are within (0,0) and (xDim,yDim), place agent.
+            JanusABM.Agents_ON_LATTICE c = NewAgentSQ(xinit, yinit);
+            c.type = STEM;
+            c.parent = xinit * yDim + yinit;
+            c.SetCellColor();
+        }
+    }
+
+    ////////////////
+    //GRID METHODS//
+    ////////////////
+    public void Draw(UIGrid vis) {
+        for (int x = 0; x < xDim; x++) {
+            for (int y = 0; y < yDim; y++) {
+                JanusABM.Agents_ON_LATTICE drawMe = GetAgent(x, y);
+                if (drawMe != null) {
+                    vis.SetPix(x, y, drawMe.color);
+                } else {
+                    vis.SetPix(x, y, WHITE); //EMPTY=WHITE
+                    //vis.SetPix(x,y, HeatMapRGB(MIR.Get(x, y)));
+                }
+            }
+        }
+    }
+
+    public void DrawMIR(UIGrid vis) {
+        for (int x = 0; x < xDim; x++) {
+            for (int y = 0; y < yDim; y++) {
+                JanusABM.Agents_ON_LATTICE drawMe = GetAgent(x, y);
+                if (drawMe != null) {
+                    vis.SetPix(x, y, HeatMapRGB(MIR.Get(x, y)));
+                } else {
+                    vis.SetPix(x, y, HeatMapRGB(MIR.Get(x, y)));
+
+                }
+            }
+        }
+    }
+
+    public void DrawTNFA(UIGrid vis) {
+        for (int x = 0; x < xDim; x++) {
+            for (int y = 0; y < yDim; y++) {
+                JanusABM.Agents_ON_LATTICE drawMe = GetAgent(x, y);
+                if (drawMe != null) {
+                    vis.SetPix(x, y, HeatMapRGB(TNFA.Get(x, y)));
+                } else {
+                    vis.SetPix(x, y, HeatMapRGB(TNFA.Get(x, y)));
+
+                }
+            }
+        }
+    }
+
+    public void DrawTREATMENT(UIGrid vis) {
+        for (int x = 0; x < xDim; x++) {
+            for (int y = 0; y < yDim; y++) {
+                JanusABM.Agents_ON_LATTICE drawMe = GetAgent(x, y);
+                if (drawMe != null) {
+                    vis.SetPix(x, y, HeatMapRGB(TREATMENT.Get(x, y)));
+                } else {
+                    vis.SetPix(x, y, HeatMapRGB(TREATMENT.Get(x, y)));
+
+                }
+            }
+        }
+    }
+
+    public void DrawAntiMIR(UIGrid vis) {
+        for (int x = 0; x < xDim; x++) {
+            for (int y = 0; y < yDim; y++) {
+                JanusABM.Agents_ON_LATTICE drawMe = GetAgent(x, y);
+                if (drawMe != null) {
+                    vis.SetPix(x, y, HeatMapRGB(anti_MIR.Get(x, y)));
+                } else {
+                    vis.SetPix(x, y, HeatMapRGB(anti_MIR.Get(x, y)));
+
+                }
+            }
+        }
+    }
+
+    public double[] CellCounts() {
+        double[] counts = new double[8];
+        for (JanusABM.Agents_ON_LATTICE c : this) {
+            if (c.type == BLAST) {
+                counts[0]++;
+            } else if (c.type == STEM) {
+                counts[1]++;
+            } else if (c.type == EC_SIN) {
+                counts[2]++;
+            } else if (c.type == EC_ART) {
+                counts[3]++;
+            }
+        }
+        return counts;
+    }
+
+    public List CellLineage() {
+        List myList = new ArrayList();
+        for (JanusABM.Agents_ON_LATTICE c : this) {
+            myList.add(c.parent);
+            myList.add(c.Isq());
+            myList.add(c.type);
+            myList.add(c.Xsq());
+            myList.add(c.Ysq());
+
+        }
+        return myList;
+    }
+
+    public void RecordOut(FileIO writeHere, int time, double[] cts) {
+        writeHere.Write(time + ",");
+        writeHere.WriteDelimit(cts, ",");
+        writeHere.Write("," + "\n");
+    }
+    public void RecordSeed(FileWriter writeHere, int seed) {
+        try {
+            // Create a BufferedWriter for better efficiency when writing
+            BufferedWriter bufferedWriter = new BufferedWriter(writeHere);
+
+            // Write the seed value followed by a comma and newline
+            bufferedWriter.write(seed + ",\n");
+
+            // Close the BufferedWriter to ensure the data is saved
+            bufferedWriter.close();
+        } catch (IOException e) {
+        }
+    }
+
+
+
+    public void saveListAsCsv(List<Integer> list, int timeStep, FileWriter fileWriter) {
+        try {
+            if (timeStep >= 0) {
+                fileWriter.write("Parent,Position,Type,X,Y,Time\n");
+                for (int i = 0; i < list.size(); i += 5) {
+                    int first = list.get(i);
+                    int second = list.get(i + 1);
+                    int third = list.get(i + 2);
+                    int fourth = list.get(i + 3);
+                    int fifth = list.get(i + 4);
+                    String cell_type = null;
+                    if (third == 1) {
+                        cell_type = "Blast";
+                    }
+                    if (third == 2) {
+                        cell_type = "Stem";
+                    }
+                    if (third == 3) {
+                        cell_type = "ART";
+                    }
+                    if (third == 4) {
+                        cell_type = "Sin";
+                    }
+                    fileWriter.write(first + "," + second + "," + cell_type + "," + fourth + "," + fifth + "," + timeStep + "\n");
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    //    public static double anti_MIR_PRETREAT = 4;
+    //    //public static double TREATMENT_Duration = TREATMENT_START+ 30; // for 30 days TKI
+    //
+    //    public static double TREATMENT_Duration = TREATMENT_START+ 30-anti_MIR_PRETREAT; // for dose control
+    //    //public double anti_MIR_END = TREATMENT_START + 30; //change the miRisten end point
+    //
+    //    public double anti_MIR_END = TREATMENT_START + 30; //change the miRisten end point
+    public void ModelStep(double[] cell_count,
+                          List myList,
+                          boolean TREATMENT_ON,
+                          double startTreatment,
+                          double mirPretreat,
+                          //public static double TREATMENT_Duration = TREATMENT_START+ 30; // for 30 days TKI
+                          boolean seq_treat,
+                          double anti_MIR_POST_TREAT,
+                          double anti_MIR_POST_END,
+                          boolean anti_MIR_TOGGLE,
+                          boolean anti_MIR_POST_TOGGLE,
+                          double tick) {
+        boolean TREATMENT_TOGGLE = TREATMENT_ON;
+        boolean seq_treatment = seq_treat;
+        double TREATMENT_START = startTreatment;
+        double TREATMENT_Duration = TREATMENT_START + 30;
+        double anti_MIR_PRETREAT = mirPretreat;
+        double anti_MIR_END = TREATMENT_Duration;
+
+        if (seq_treatment){
+            TREATMENT_Duration = TREATMENT_START + 30 - anti_MIR_PRETREAT;
+            anti_MIR_END = TREATMENT_START;
+        }
+
+
+        ShuffleAgents(rn);
+        for (JanusABM.Agents_ON_LATTICE c : this) {
+            c.CellStep(cell_count, myList);
+        }
+        MIR.DiffusionADI(MIR_Diff_Rate, 0);
+        TNFA.DiffusionADI(TNFA_Diff_Rate, 0);
+        TREATMENT.DiffusionADI(TREATMENT_Diff_Rate, 0);
+        anti_MIR.DiffusionADI(anti_MIR_Diff_Rate, 0);
+        //Natural Decay
+        MIR.MulAll(MIR_Decay);
+        TNFA.MulAll(TNFA_Decay);
+        TREATMENT.MulAll(TREATMENT_Decay);
+        anti_MIR.MulAll(TREATMENT_Decay);
+        double tnfa_threshold = .2;
+        for (int x = 0; x < MIR.xDim; x++) {
+            for (int y = 0; y < MIR.yDim; y++) {
+                if (GetAgent(x, y) != null & anti_MIR.Get(x, y) < .2) {
+                    if (GetAgent(x, y).type == EC_ART)
+                        if (TNFA.Get(x, y) < tnfa_threshold) {
+                            MIR.Add(x, y, .20);
+                        } else if (GetAgent(x, y).type == EC_SIN)
+                            if (TNFA.Get(x, y) < tnfa_threshold) {
+                                MIR.Add(x, y, 0.20);
+                            }
+                }
+            }
+        }
+        MIR.Update();
+        for (int x = 0; x < TNFA.xDim; x++) {
+            for (int y = 0; y < TNFA.yDim; y++) {
+                if (GetAgent(x, y) != null) {
+                    if (GetAgent(x, y).type == BLAST) {
+                        TNFA.Add(x, y, 0.15);
+                    }
+                }
+            }
+        }
+        TNFA.Update();
+        double periodTick = tick;
+        if (TREATMENT_TOGGLE == true & periodTick > TREATMENT_START && periodTick < TREATMENT_Duration) {
+            //System.out.println("Treatment On");
+            for (int x = 0; x < TREATMENT.xDim; x++) {
+                for (int y = 0; y < TREATMENT.yDim; y++) {
+                    if (GetAgent(x, y) != null) {
+                        if (GetAgent(x, y).type == EC_ART) {
+                            TREATMENT.Add(x, y, TREATMENT_Production);
+                        }
+                        if (GetAgent(x, y).type == EC_SIN) {
+                            TREATMENT.Add(x, y, TREATMENT_Production);
+                        }
+                    }
+                }
+            }
+        } else if (TREATMENT_TOGGLE == true & periodTick > TREATMENT_Duration + 2) {
+            TREATMENT.SetAll(0);
+        }
+        TREATMENT.Update();
+        if (anti_MIR_TOGGLE == true & periodTick > (TREATMENT_START - anti_MIR_PRETREAT) && periodTick <= anti_MIR_END) {
+            for (int x = 0; x < anti_MIR.xDim; x++) {
+                for (int y = 0; y < anti_MIR.yDim; y++) {
+                    if (GetAgent(x, y) != null) {
+                        if (GetAgent(x, y).type == EC_ART) {
+                            anti_MIR.Add(x, y, TREATMENT_Production);
+                        }
+                        if (GetAgent(x, y).type == EC_SIN) {
+                            anti_MIR.Add(x, y, TREATMENT_Production);
+                        }
+                    }
+                }
+            }
+        } else if (anti_MIR_TOGGLE == true & periodTick > anti_MIR_END) {
+            anti_MIR.SetAll(0);
+        } else if (anti_MIR_POST_TOGGLE == true & periodTick > (TREATMENT_START + anti_MIR_POST_TREAT) && periodTick < anti_MIR_POST_END) {
+            for (int x = 0; x < anti_MIR.xDim; x++) {
+                for (int y = 0; y < anti_MIR.yDim; y++) {
+                    if (GetAgent(x, y) != null) {
+                        if (GetAgent(x, y).type == EC_ART) {
+                            anti_MIR.Add(x, y, TREATMENT_Production);
+                        }
+                        if (GetAgent(x, y).type == EC_SIN) {
+                            anti_MIR.Add(x, y, TREATMENT_Production);
+                        }
+                    }
+                }
+            }
+        }
+        // else if (anti_MIR_TOGGLE == true & periodTick > TREATMENT_Duration + 7) {
+        //     anti_MIR.SetAll(0);
+        // }
+        else if (anti_MIR_POST_TOGGLE == true & periodTick > anti_MIR_END) {
+            anti_MIR.SetAll(0);
+        }
+        anti_MIR.Update();
+        // if (cytarabine_TOGGLE == true & periodTick > cytarabine_START && periodTick < cytarabine_Duration) {
+        //     //System.out.println("cytarabine On");
+        //     for (int x = 0; x < cytarabine.xDim; x++) {
+        //         for (int y = 0; y < cytarabine.yDim; y++) {
+        //             if (GetAgent(x, y) != null) {
+        //                 if (GetAgent(x, y).type == EC_ART) {
+        //                     CYTARABINE.Add(x, y, cytarabine_Production);
+        //                 }
+        //                 if (GetAgent(x, y).type == EC_SIN) {
+        //                     CYTARABINE.Add(x, y, cytarabine_Production);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        // else if (cytarabine_TOGGLE == true & periodTick > cytarabine_Duration + 2) {
+        //     CYTARABINE.SetAll(0);
+        // }
+        // CYTARABINE.Update();
+
+        // if (daunorubicin_TOGGLE == true & periodTick > daunorubicin_START && periodTick < daunorubicin_Duration) {
+        //     //System.out.println("daunorubicin On");
+        //     for (int x = 0; x < daunorubicin.xDim; x++) {
+        //         for (int y = 0; y < daunorubicin.yDim; y++) {
+        //             if (GetAgent(x, y) != null) {
+        //                 if (GetAgent(x, y).type == EC_ART) {
+        //                      DAUNORUBICIN.Add(x, y, daunorubicin_Production);
+        //                 }
+        //                 if (GetAgent(x, y).type == EC_SIN) {
+        //                     DAUNORUBICIN.Add(x, y, daunorubicin_Production);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        // else if (daunorubicin_TOGGLE == true & periodTick > daunorubicin_Duration + 2) {
+        //      DAUNORUBICIN.SetAll(0);
+        // }
+        // DAUNORUBICIN..Update();
+
+
+    }
+
+    ////////
+    //MAIN//
+    ////////
+    public static void main(String[] args) throws IOException {
+
+        if (HEADLESS) {
+            System.setProperty("java.awt.headless", "true");
+        }
+
+        // TIME STAMP
+        java.util.Date now = new java.util.Date();
+        java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd_HH_ss");
+        int numIterations = ITERATIONS; // Change this value to specify the number of iterations
+        String save = new String();
+        int xDim = 100;
+        int yDim = 100;
+        double TIMESTEPS = STEPS;
+        double anti_MIR_PRETREAT;
+        boolean seq_treatment = false; // sets whether we treat with sequential monotherapy as pre-treatment
+        double anti_MIR_POST_TREAT = 0;
+        //double anti_MIR_POST_END = TREATMENT_Duration + anti_MIR_POST_TREAT;
+        boolean TREATMENT_TOGGLE = true;
+        boolean anti_MIR_TOGGLE = true;
+        boolean anti_MIR_POST_TOGGLE = false;
+        boolean BASE_GRID = false;
+
+        List<Double> vascGrid = Arrays.asList(1.0, 5.0, 7.0);
+        List<Integer> treatmentGrid = Arrays.asList(1, 7);
+
+        int vascArrayLength = vascGrid.size();
+        int treatmentGridLength = treatmentGrid.size();
+
+        for (double h : treatmentGrid) {
+            anti_MIR_PRETREAT = h;
+            for (double k : vascGrid) {
+                double VASC_GRID = k;
+                // PATHS
+                if (TREATMENT_TOGGLE == true & anti_MIR_TOGGLE == false & anti_MIR_POST_TOGGLE == false & seq_treatment == false) {
+                    if (VASC_GRID == 1 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 2 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 3 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 4 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 5 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 6 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 7 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 8 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 9 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 10 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 11 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 12 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 13 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 14 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 15 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (VASC_GRID == 16 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment";
+                    } else if (BASE_GRID == true) {
+                        save = "Treatment";
+                    }
+                } else if (TREATMENT_TOGGLE == true & anti_MIR_TOGGLE == true & anti_MIR_PRETREAT == 0 & seq_treatment == false) {
+                    if (VASC_GRID == 1 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 2 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 3 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 4 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 5 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 6 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 7 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 8 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 9 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 10 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 11 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 12 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 13 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 14 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 15 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    }
+                    if (VASC_GRID == 16 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR";
+                    } else if (BASE_GRID == true) {
+                        save = "Treatment + anti-MIR";
+                    }
+                } else if (TREATMENT_TOGGLE == true & anti_MIR_TOGGLE == true & anti_MIR_PRETREAT > 0 & seq_treatment == false) {
+                    if (VASC_GRID == 1 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 2 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 3 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 4 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 5 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 6 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 7 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 8 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 9 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 10 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 11 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 12 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 13 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 14 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 15 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                    if (VASC_GRID == 16 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    } else if (BASE_GRID == true) {
+                        save = "Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT;
+                    }
+                } else if (TREATMENT_TOGGLE == true & anti_MIR_TOGGLE == false & anti_MIR_POST_TOGGLE == true & anti_MIR_POST_TREAT > 0 & seq_treatment == false) {
+                    if (VASC_GRID == 1 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 2 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 3 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 4 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 5 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 6 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 7 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 8 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 9 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 10 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 11 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 12 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 13 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 14 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 15 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                    if (VASC_GRID == 16 & BASE_GRID == false) {
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    } else if (BASE_GRID == true) {
+                        save = "Treatment + anti-MIR post_treat_" + anti_MIR_POST_TREAT;
+                    }
+                } else if (seq_treatment == true) {
+                    if (VASC_GRID == 1 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 2 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 3 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 4 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 5 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 6 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 7 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 8 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 9 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 10 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 11 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 12 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 13 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 14 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 15 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    }
+                    if (VASC_GRID == 16 & BASE_GRID == false) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Vasc_Arch/Vasc" + VASC_GRID + "/pre_treatment" + myInt1 + "_tki_" + myInt2;
+                    } else if (BASE_GRID == true) {
+                        int myInt1 = (int) anti_MIR_PRETREAT;
+                        int myInt2 = (int) (30 - Math.round(anti_MIR_PRETREAT));
+                        save = "Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT + "/" + "pre_treat" + myInt1 + "_tki_" + myInt2;
+                    }
+                }
+                String projPath = "/Users/80024703/Desktop/JanusData/";
+                if (!LOCAL){
+                    projPath = "Janus/Results/";
+
+                }
+                String setting_dir = projPath + save + "/output"+ "/iteration_";
+                System.out.println(setting_dir);
+                // CREATE OUTPUT DIR
+                new File(setting_dir).mkdirs();
+                String output_dir = setting_dir;
+                new File(output_dir).mkdirs();
+                // OUTPUT FILES
+                // Create output directory path base
+                String baseOutputDir = projPath + save + "/output";
+
+
+
+                // Declare graphical resources (conditionally initialized)
+                GridWindow win = null, MIR_vis = null, TNFA_vis = null, TREATMENT_vis = null, ANTIMIR_vis = null;
+                GifMaker gm = null, gm_MIR_vis = null, gm_TNFA_vis = null, gm_TREATMENT_vis = null, gm_ANTIMIR_vis = null;
+                if (!HEADLESS) {
+                    win = new GridWindow(xDim, yDim, 8);
+                    MIR_vis = new GridWindow(xDim, yDim, 8);
+                    TNFA_vis = new GridWindow(xDim, yDim, 8);
+                    TREATMENT_vis = new GridWindow(xDim, yDim, 8);
+                    ANTIMIR_vis = new GridWindow(xDim, yDim, 8);
+
+                    gm = new GifMaker(baseOutputDir.concat("/Vid.gif"), 100, true);
+                    gm_MIR_vis = new GifMaker(baseOutputDir.concat("/MIRVid.gif"), 100, true);
+                    gm_TNFA_vis = new GifMaker(baseOutputDir.concat("/TNFAVid.gif"), 100, true);
+                    gm_TREATMENT_vis = new GifMaker(baseOutputDir.concat("/TREATMENTVid.gif"), 100, true);
+                    gm_ANTIMIR_vis = new GifMaker(baseOutputDir.concat("/ANTIMIRVid.gif"), 100, true);
+                }
+
+                int j = 0;
+                while (j < numIterations) {
+                    // OUTPUT WINDOW (Create outside the loop)
+
+
+
+                    String output_subdir = output_dir.concat(j + "/");
+                    new File(output_subdir).mkdirs();  // <---- Ensure this subdirectory exists
+                    String path_to_output_file = output_subdir.concat("CellCounts_" + j).concat(".csv");
+
+
+                    // GRID
+                    JanusABM.Grid_ON_LATTICE g = new JanusABM.Grid_ON_LATTICE(xDim, yDim, k, BASE_GRID, path_to_output_file);
+                    FileWriter fileWriter = new FileWriter(output_dir.concat(j + "/").concat("CellLineage_" + j + ".csv"));
+                    FileWriter seedWriter= new FileWriter(output_dir.concat(j + "/").concat("Random Seed_" + j + ".csv"));
+
+                    // GRAPHICAL OUTPUT
+                    // TIME LOOP
+                    for (int i = 0; i < TIMESTEPS; i++) {
+                        if (!HEADLESS) {
+                            win.TickPause(10);
+                            g.Draw(win);
+                            gm.AddFrame(win); //GIF MAKER
+                            g.DrawMIR(MIR_vis);
+                            gm_MIR_vis.AddFrame(MIR_vis);
+                            g.DrawTNFA(TNFA_vis);
+                            gm_TNFA_vis.AddFrame(TNFA_vis);
+                            g.DrawTREATMENT(TREATMENT_vis);
+                            gm_TREATMENT_vis.AddFrame(TREATMENT_vis);
+                            g.DrawAntiMIR(ANTIMIR_vis);
+                            gm_ANTIMIR_vis.AddFrame(ANTIMIR_vis);
+                        }
+
+                        // COUNT CURRENT POPULATION
+                        double[] cell_count = g.CellCounts();
+                        cell_count[4] = g.MIR.GetAvg();
+                        cell_count[5] = g.TNFA.GetAvg();
+                        cell_count[6] = g.anti_MIR.GetAvg();
+                        cell_count[7] = g.TREATMENT.GetAvg();
+                        List myList = g.CellLineage();
+                        // RUN MODEL SIMULATION STEP
+                        g.ModelStep(cell_count,
+                                myList,
+                                true,
+                                40,
+                                h,
+                                seq_treatment,
+                                0,
+                                0,
+                                anti_MIR_TOGGLE,
+                                anti_MIR_POST_TOGGLE,
+                                i);
+                        //System.out.println("Timestep=" + i);
+
+                        // OTHER OUTPUT
+                        g.RecordSeed(seedWriter, g.resultForRand);
+                        g.RecordOut(g.output, i, cell_count);
+                        g.saveListAsCsv(myList, i, fileWriter);
+                    }
+
+                    g.output.Close();
+
+                    if (j < numIterations) {
+                        System.out.println("Current Iteration: " + j);
+                    }
+                    j++;
+                    if (j == numIterations && k == vascArrayLength && h == treatmentGridLength) {
+                        if(!HEADLESS){
+                            gm.Close();
+                            win.Close();
+                            gm_MIR_vis.Close();
+                            gm_TNFA_vis.Close();
+                            gm_TREATMENT_vis.Close();
+                            gm_ANTIMIR_vis.Close();
+                            MIR_vis.Close();
+                            TNFA_vis.Close();
+                            TREATMENT_vis.Close();
+                            ANTIMIR_vis.Close();
+                        }
+                    }
+                }
+
+            }
+
+        }
+
+
+    }
+}
+//////////////
+//CELL CLASS//
+//////////////
+class Agents_ON_LATTICE extends AgentSQ2Dunstackable<JanusABM.Grid_ON_LATTICE> {
+    public int type;
+    public int parent;
+    public int position;
+    int color;
+    ////////////////
+    //CELL METHODS//
+    ////////////////
+    final public static int blast = RGB256(17, 150, 150);
+    final public static int stem = BLACK;
+    static final public int ec_sin = RGB256(120, 200, 15);
+    final public static int ec_art = RGB256(260, 0, 15);
+    public static int CategorialColor(int index) {
+        switch (index) {
+            case EC_SIN:
+                return ec_sin;
+            case EC_ART:
+                return ec_art;
+            case STEM:
+                return stem;
+            case BLAST:
+                return blast;
+            case 0:
+            default:
+                throw new IllegalArgumentException("index outside color category range index: " + index);
+        }
+    }
+    void SetCellColor() {
+        color = CategorialColor((int) Math.round(0 + type));
+    }
+    void CellStep(double[] cell_count, List myList) {
+        G.MIR.Mul(Isq(), G.MIR_Uptake);
+        G.TNFA.Mul(Isq(), G.TNFA_Uptake);
+        G.TREATMENT.Mul(Isq(), G.TREATMENT_Uptake);
+        G.anti_MIR.Mul(Isq(), G.anti_MIR_Uptake);
+        if (this.type == BLAST) {
+            //STEP 1: death
+            if (G.rn.Double() < G.DEATH_PROB + (G.TREATMENT.Get(Isq()) * G.TREATMENT_Death)) {
+                Dispose();
+                return;
+            }
+            //STEP 2: division
+            if (G.rn.Double() < G.PROLIFERATION_PROB) {
+                int[] divHood = MooreHood(true);
+                int emptyNeighbors = MapEmptyHood(divHood);
+                //Create new Agent
+                if (emptyNeighbors > 0) {
+                    JanusABM.Agents_ON_LATTICE child = G.NewAgentSQ(divHood[G.rn.Int(emptyNeighbors)]);
+                    child.type = this.type;
+                    child.parent = this.parent;
+                    child.SetCellColor();
+                }
+            }
+        }
+        if (this.type == STEM) {
+            //STEP 1: death
+            if (G.MIR.Get(Isq()) > 0.003);
+            else if( (G.MIR.Get(Isq()) - G.anti_MIR.Get(Isq()) <= 0.003) & G.rn.Double() < STEM_DEATH_PROB +
+                    ((G.TREATMENT.Get(Isq()) * G.TREATMENT_Death))){
+                Dispose();
+                return;
+            }
+            //STEP 2: division
+            if (G.rn.Double() < (STEM_PROLIFERATION_PROB - G.MIR.Get(Isq()))){
+                int[] divHood = MooreHood(true);
+                int emptyNeighbors = MapEmptyHood(divHood);
+                // asymmetric division
+                if (emptyNeighbors > 0 & cell_count[1] < 500) {
+                    JanusABM.Agents_ON_LATTICE child = G.NewAgentSQ(divHood[G.rn.Int(emptyNeighbors)]);
+                    child.type = this.type;
+                    child.parent = this.parent;
+                    child.SetCellColor();
+                    // symmetric division
+                } else if (emptyNeighbors > 0 & cell_count[0] < 1000) {
+                    JanusABM.Agents_ON_LATTICE child = G.NewAgentSQ(divHood[G.rn.Int(emptyNeighbors)]);
+                    child.type = BLAST;
+                    child.SetCellColor();
+                }
+            }
+        }
+        if (this.type == EC_ART) {
+            if (G.TNFA.Get(Isq()) > G.MIR.Get(Isq())) {
+                this.type = EC_SIN;
+                this.SetCellColor();
+            }
+            else if (G.TNFA.Get(Isq()) < G.MIR.Get(Isq())){
+                this.type = EC_ART;
+                this.SetCellColor();
+            }
+        }
+        if (this.type == EC_SIN) {
+            if (G.TNFA.Get(Isq()) > G.MIR.Get(Isq())){
+                this.type = EC_SIN;
+                this.SetCellColor();
+            }
+            else if (G.TNFA.Get(Isq()) < G.MIR.Get(Isq())){
+                this.type = EC_ART;
+                this.SetCellColor();
+            }
+        }
+    }
+}
