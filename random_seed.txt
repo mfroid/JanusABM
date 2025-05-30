@@ -1,0 +1,3 @@
+In the two files no_vasc_random_seeds.csv and vasc_random_seeds.csv, all random seeds for each iteration of every simulation set can be found.
+
+For any set of simulations that are not contained in either csv file, then the random seed used was the integer ‘1’.
