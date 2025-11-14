@@ -34,57 +34,17 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
     public double MIR_Diff_Rate = 0.2;
     public double MIR_Decay = -.01;
     public double TNFA_Uptake = -.30;
-    public double TNFA_Diff_Rate = 0.1; //0.15
+    public double TNFA_Diff_Rate = 0.1;
     public double TNFA_Decay = -.01;
     public static double TREATMENT_START = 40;
     public double TREATMENT_Production = 1.0;
     public double TREATMENT_Uptake = 1;
-    public double TREATMENT_Diff_Rate = 2.5; //2.33 x 10^-12 m^2/s, 2.5 worked
+    public double TREATMENT_Diff_Rate = 2.5; //2.5 x 10^-12 m^2/s
     public double anti_MIR_Diff_Rate = 0.133; //
     public double TREATMENT_Death = 1.0;
     public double TREATMENT_Decay = -0.01;
     public double anti_MIR_Uptake = 1;
-
-    //public static double anti_MIR_PRETREAT = 4;
-    //public static double TREATMENT_Duration = TREATMENT_START+ 30; // for 30 days TKI
-
-    //public static double TREATMENT_Duration = TREATMENT_START+ 30-anti_MIR_PRETREAT; // for dose control
-
-    //public double anti_MIR_END = TREATMENT_START + 30; //change the miRisten end point
-
-    //public double anti_MIR_END = TREATMENT_START + 30; //change the miRisten end point
-
-    // 9/11/23
-    // added anti_MIR_END and anti_MIR_POST_END
-    // need to test if the code still runs when the proper end point is selected for pre and post anti_MIR
-    // the code below was updated so that pre and post anti_MIR ends at anti_MIR_END and anti_MIR_POST_END
-    // ask David if I should do something about MIR having no half-life, but half-life of TKI being ~7 days
-
-    // 9/12/23
-    // remember to remove the subtraction of miristen pretreatment from tki treatment duration
-    // possibly modify code for a switch between the two lines rather than commenting out
-
-    //9/13/23
-    // need to add a case for when pre or post treatment with miristen is 1 day
-    // otherwise there is no pretreatment
-
-    // 10/3/23
-    // cytarabine molecular weight 243.22
-
-    // 9/10/24
-    // recollecting all data
-    // starting with only TKI on the base grid
-    // miristen pretreatment 14 days
-    // miristen concurrent
-    // miristen pretreatment 7 days
-    // miristen pretreatment 2 days
-    // miristen pretreatment 1 day
-    // 30 days total treatment with miristen for 1, 2, 7, 14 days
-    // different vascular architectures with tki
-    // 10/18/24 try 4 days pretreatment with 26 days TKI for all vascular architectures
-
-    //public static double anti_MIR_POST_TREAT = 0;
-    //public double anti_MIR_POST_END = TREATMENT_Duration+anti_MIR_POST_TREAT;
+    
 
     public final static double STEPS = 15;
     public final static int ITERATIONS = 1;
@@ -99,7 +59,7 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
     SimpleDateFormat timeForRand = new SimpleDateFormat("HHmm"); // Use HH for 24-hour format
     String timeString = timeForRand.format(new Date()); // Get the current time as a formatted string
     int resultForRand = Integer.parseInt(timeString); // Parse the formatted string to an integer
-   //Rand rn = new Rand(resultForRand); // Set the seed for Rand
+    //Rand rn = new Rand(resultForRand); // Set the seed for Rand
     Rand rn = new Rand(); // Set the seed for Rand
 
     ////////////////////
@@ -1084,9 +1044,7 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
         } catch (IOException e) {
         }
     }
-
-
-
+    
     public void saveListAsCsv(List<Integer> list, int timeStep, FileWriter fileWriter) {
         try {
             if (timeStep >= 0) {
@@ -1243,47 +1201,6 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
             anti_MIR.SetAll(0);
         }
         anti_MIR.Update();
-        // if (cytarabine_TOGGLE == true & periodTick > cytarabine_START && periodTick < cytarabine_Duration) {
-        //     //System.out.println("cytarabine On");
-        //     for (int x = 0; x < cytarabine.xDim; x++) {
-        //         for (int y = 0; y < cytarabine.yDim; y++) {
-        //             if (GetAgent(x, y) != null) {
-        //                 if (GetAgent(x, y).type == EC_ART) {
-        //                     CYTARABINE.Add(x, y, cytarabine_Production);
-        //                 }
-        //                 if (GetAgent(x, y).type == EC_SIN) {
-        //                     CYTARABINE.Add(x, y, cytarabine_Production);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-        // else if (cytarabine_TOGGLE == true & periodTick > cytarabine_Duration + 2) {
-        //     CYTARABINE.SetAll(0);
-        // }
-        // CYTARABINE.Update();
-
-        // if (daunorubicin_TOGGLE == true & periodTick > daunorubicin_START && periodTick < daunorubicin_Duration) {
-        //     //System.out.println("daunorubicin On");
-        //     for (int x = 0; x < daunorubicin.xDim; x++) {
-        //         for (int y = 0; y < daunorubicin.yDim; y++) {
-        //             if (GetAgent(x, y) != null) {
-        //                 if (GetAgent(x, y).type == EC_ART) {
-        //                      DAUNORUBICIN.Add(x, y, daunorubicin_Production);
-        //                 }
-        //                 if (GetAgent(x, y).type == EC_SIN) {
-        //                     DAUNORUBICIN.Add(x, y, daunorubicin_Production);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-        // else if (daunorubicin_TOGGLE == true & periodTick > daunorubicin_Duration + 2) {
-        //      DAUNORUBICIN.SetAll(0);
-        // }
-        // DAUNORUBICIN..Update();
-
-
     }
 
     ////////
