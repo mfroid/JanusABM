@@ -36,7 +36,6 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
     public double TNFA_Uptake = -.30;
     public double TNFA_Diff_Rate = 0.1;
     public double TNFA_Decay = -.01;
-    public static double TREATMENT_START = 40;
     public double TREATMENT_Production = 1.0;
     public double TREATMENT_Uptake = 1;
     public double TREATMENT_Diff_Rate = 2.5; //2.5 x 10^-12 m^2/s
@@ -44,9 +43,8 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
     public double TREATMENT_Death = 1.0;
     public double TREATMENT_Decay = -0.01;
     public double anti_MIR_Uptake = 1;
-    
 
-    public final static double STEPS = 15;
+    public final static double STEPS = 150;
     public final static int ITERATIONS = 1;
     public static boolean HEADLESS = false;
     public static boolean LOCAL = true;
@@ -1044,7 +1042,7 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
         } catch (IOException e) {
         }
     }
-    
+
     public void saveListAsCsv(List<Integer> list, int timeStep, FileWriter fileWriter) {
         try {
             if (timeStep >= 0) {
@@ -1221,16 +1219,16 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
         int yDim = 100;
         double TIMESTEPS = STEPS;
         double anti_MIR_PRETREAT;
-        boolean seq_treatment = false; // sets whether we treat with sequential monotherapy as pre-treatment
+        boolean seq_treatment = true; // sets whether we treat with sequential monotherapy as pre-treatment
         double anti_MIR_POST_TREAT = 0;
         //double anti_MIR_POST_END = TREATMENT_Duration + anti_MIR_POST_TREAT;
         boolean TREATMENT_TOGGLE = true;
         boolean anti_MIR_TOGGLE = true;
         boolean anti_MIR_POST_TOGGLE = false;
-        boolean BASE_GRID = false;
+        boolean BASE_GRID = true;
 
         List<Double> vascGrid = Arrays.asList(1.0, 5.0, 7.0);
-        List<Integer> treatmentGrid = Arrays.asList(1, 7);
+        List<Integer> treatmentGrid = Arrays.asList(14);
 
         int vascArrayLength = vascGrid.size();
         int treatmentGridLength = treatmentGrid.size();
@@ -1697,8 +1695,7 @@ class Agents_ON_LATTICE extends AgentSQ2Dunstackable<JanusABM.Grid_ON_LATTICE> {
         }
         if (this.type == STEM) {
             //STEP 1: death
-            if (G.MIR.Get(Isq()) > 0.003);
-            else if( (G.MIR.Get(Isq()) - G.anti_MIR.Get(Isq()) <= 0.003) & G.rn.Double() < STEM_DEATH_PROB +
+            if( (G.MIR.Get(Isq()) - G.anti_MIR.Get(Isq()) <= 0.003) & G.rn.Double() < STEM_DEATH_PROB +
                     ((G.TREATMENT.Get(Isq()) * G.TREATMENT_Death))){
                 Dispose();
                 return;
