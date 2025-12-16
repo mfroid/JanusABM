@@ -1513,7 +1513,7 @@ public class Grid_ON_LATTICE extends AgentGrid2D<JanusABM.Agents_ON_LATTICE> {
                         save = "Treatment + anti-MIR pretreat_" + anti_MIR_PRETREAT + "/" + "pre_treat" + myInt1 + "_tki_" + myInt2;
                     }
                 }
-                String projPath = "/Users/80024703/Desktop/JanusData/";
+                String projPath = "/Desktop/JanusData/";
                 if (!LOCAL){
                     projPath = "Janus/Results/";
 
